@@ -1,0 +1,15 @@
+```text
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+.env
+
+data/vector_store/
+*.index
+
+.pytest_cache/
+
+.DS_Store
+```

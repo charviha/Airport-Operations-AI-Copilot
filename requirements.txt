@@ -1,0 +1,11 @@
+pandas
+numpy
+sentence-transformers
+faiss-cpu
+google-genai
+python-dotenv
+streamlit
+langchain
+langgraph
+pytest
+jupyter
