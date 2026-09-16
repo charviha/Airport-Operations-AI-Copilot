@@ -1,3 +1,4 @@
+
 import os
 import json
 
@@ -30,10 +31,7 @@ MAX_ITERATIONS = 5
 # OPERATIONS INVESTIGATOR
 # ============================================================
 
-def operations_investigator(
-    airport: str
-) -> dict:
-
+def operations_investigator(airport: str) -> dict:
     """
     Investigates the current operational condition
     of an airport using telemetry data.
@@ -45,7 +43,7 @@ def operations_investigator(
         return {
             "success": False,
             "agent": "Operations Investigator",
-            "error": metrics.get("error")
+            "error": metrics.get("error"),
         }
 
     queue = metrics["queue_size"]
@@ -59,7 +57,6 @@ def operations_investigator(
         issues.append(
             "Queue is above the mandatory investigation threshold."
         )
-
     elif queue > 150:
         issues.append(
             "Queue is above the elevated congestion threshold."
@@ -80,6 +77,11 @@ def operations_investigator(
             "Driver cancellation rate is elevated."
         )
 
+    if not issues:
+        issues.append(
+            "No critical operational threshold has been breached."
+        )
+
     return {
         "success": True,
         "agent": "Operations Investigator",
@@ -95,9 +97,8 @@ def operations_investigator(
 
 def policy_compliance_agent(
     question: str,
-    airport: str | None = None
+    airport: str | None = None,
 ) -> dict:
-
     """
     Uses the RAG pipeline to retrieve and answer
     policy-related questions.
@@ -106,7 +107,7 @@ def policy_compliance_agent(
     result = answer_question(
         question,
         airport=airport,
-        top_k=3
+        top_k=3,
     )
 
     return {
@@ -124,9 +125,8 @@ def policy_compliance_agent(
 def resolution_agent(
     question: str,
     operations_result: dict | None,
-    policy_result: dict | None
+    policy_result: dict | None,
 ) -> dict:
-
     """
     Combines operational findings and policy information
     and produces a recommended resolution.
@@ -134,12 +134,12 @@ def resolution_agent(
 
     operations_text = json.dumps(
         operations_result or {},
-        indent=2
+        indent=2,
     )
 
     policy_text = json.dumps(
         policy_result or {},
-        indent=2
+        indent=2,
     )
 
     prompt = f"""
@@ -171,7 +171,7 @@ Return a clear operational recommendation.
 
     interaction = client.interactions.create(
         model=LLM_MODEL,
-        input=prompt
+        input=prompt,
     )
 
     return {
@@ -188,21 +188,25 @@ Return a clear operational recommendation.
 class AirportOrchestrator:
 
     def __init__(self):
-
         self.memory = ConversationMemory()
 
     # --------------------------------------------------------
-    # Determine which agents are required
+    # Determine initial agents
     # --------------------------------------------------------
 
-    def determine_agents(
+    def determine_initial_agents(
         self,
-        question: str
+        question: str,
     ) -> list[str]:
+        """
+        Determines the first agent that should investigate
+        the user's request.
+
+        The rest of the workflow is decided dynamically
+        after agent results are observed.
+        """
 
         question_lower = question.lower()
-
-        agents = []
 
         operational_keywords = [
             "metric",
@@ -215,7 +219,7 @@ class AirportOrchestrator:
             "requests",
             "operational",
             "current",
-            "latest"
+            "latest",
         ]
 
         policy_keywords = [
@@ -226,7 +230,7 @@ class AirportOrchestrator:
             "rule",
             "limit",
             "compliance",
-            "threshold"
+            "threshold",
         ]
 
         resolution_keywords = [
@@ -235,56 +239,140 @@ class AirportOrchestrator:
             "resolve",
             "fix",
             "action",
-            "increase surge",
-            "apply surge",
-            "what can we do"
+            "what can we do",
         ]
+
+        # Resolution questions need operational
+        # investigation first.
+        if any(
+            keyword in question_lower
+            for keyword in resolution_keywords
+        ):
+            return ["operations"]
 
         if any(
             keyword in question_lower
             for keyword in operational_keywords
         ):
-            agents.append("operations")
+            return ["operations"]
 
         if any(
             keyword in question_lower
             for keyword in policy_keywords
         ):
-            agents.append("policy")
+            return ["policy"]
+
+        # Default to policy/RAG.
+        return ["policy"]
+
+    # --------------------------------------------------------
+    # Decide what to do after operations investigation
+    # --------------------------------------------------------
+
+    def decide_after_operations(
+        self,
+        question: str,
+        operations_result: dict,
+    ) -> str:
+        """
+        Determines the next step after operational
+        investigation.
+
+        Returns:
+            policy
+            resolution
+            done
+        """
+
+        question_lower = question.lower()
+
+        resolution_keywords = [
+            "what should",
+            "recommend",
+            "resolve",
+            "fix",
+            "action",
+            "what can we do",
+            "increase",
+            "decrease",
+            "change",
+            "override",
+        ]
+
+        policy_keywords = [
+            "policy",
+            "allowed",
+            "maximum",
+            "approval",
+            "rule",
+            "limit",
+            "compliance",
+            "threshold",
+        ]
+
+        # If the user explicitly wants a recommendation,
+        # policy should be checked before resolution.
+        if any(
+            keyword in question_lower
+            for keyword in resolution_keywords
+        ):
+            return "policy"
+
+        # If the user is asking specifically about policy,
+        # retrieve policy information.
+        if any(
+            keyword in question_lower
+            for keyword in policy_keywords
+        ):
+            return "policy"
+
+        # Pure metrics question is already answered.
+        return "done"
+
+    # --------------------------------------------------------
+    # Decide what to do after policy investigation
+    # --------------------------------------------------------
+
+    def decide_after_policy(
+        self,
+        question: str,
+    ) -> str:
+        """
+        Determines whether a resolution agent is required.
+        """
+
+        question_lower = question.lower()
+
+        resolution_keywords = [
+            "what should",
+            "recommend",
+            "resolve",
+            "fix",
+            "action",
+            "what can we do",
+            "increase",
+            "decrease",
+            "change",
+            "override",
+        ]
 
         if any(
             keyword in question_lower
             for keyword in resolution_keywords
         ):
-            agents.append("resolution")
+            return "resolution"
 
-        # If nothing matched, use Policy & Compliance
-        if not agents:
-            agents.append("policy")
-
-        # Resolution questions need both operations and policy
-        if "resolution" in agents:
-
-            if "operations" not in agents:
-                agents.insert(0, "operations")
-
-            if "policy" not in agents:
-                agents.insert(1, "policy")
-
-        # Remove duplicates while preserving order
-        agents = list(dict.fromkeys(agents))
-
-        return agents
+        return "done"
 
     # --------------------------------------------------------
-    # Main workflow
+    # Main agentic workflow
     # --------------------------------------------------------
 
     def run(
         self,
         question: str,
         airport: str | None = None,
-        session_id: str = "default"
+        session_id: str = "default",
     ) -> dict:
 
         # ----------------------------------------------------
@@ -294,7 +382,7 @@ class AirportOrchestrator:
         self.memory.add_message(
             session_id,
             "user",
-            question
+            question,
         )
 
         history = self.memory.format_history(
@@ -312,106 +400,176 @@ class AirportOrchestrator:
         print(history)
 
         # ----------------------------------------------------
-        # Determine agents
+        # Initial decision
         # ----------------------------------------------------
 
-        selected_agents = self.determine_agents(
+        pending_agents = self.determine_initial_agents(
             question
         )
 
-        print("\nSelected Agents:")
+        print("\nInitial Agent:")
+        print("-", pending_agents[0])
 
-        for agent in selected_agents:
-            print(f"- {agent}")
+        # ----------------------------------------------------
+        # Results
+        # ----------------------------------------------------
 
         operations_result = None
         policy_result = None
         resolution_result = None
 
-        # ----------------------------------------------------
-        # ReAct-style workflow
-        # ----------------------------------------------------
+        execution_trace = []
 
         iteration = 0
 
-        # ====================================================
-        # OPERATIONS AGENT
-        # ====================================================
+        # ----------------------------------------------------
+        # Dynamic ReAct-style loop
+        # ----------------------------------------------------
 
-        if "operations" in selected_agents:
+        while pending_agents and iteration < MAX_ITERATIONS:
+
+            current_agent = pending_agents.pop(0)
 
             iteration += 1
+
+            trace_entry = {
+                "iteration": iteration,
+                "agent": current_agent,
+                "status": "started",
+            }
 
             print(
                 f"\nIteration {iteration}/{MAX_ITERATIONS}"
             )
 
-            if not airport:
+            # ==================================================
+            # OPERATIONS
+            # ==================================================
 
-                operations_result = {
-                    "success": False,
-                    "error": "Airport is required."
-                }
+            if current_agent == "operations":
 
-            else:
+                print("\n[Operations Investigator]")
 
-                print(
-                    "\n[Operations Investigator]"
+                trace_entry["action"] = (
+                    "Investigating airport telemetry."
                 )
 
-                operations_result = (
-                    operations_investigator(
-                        airport
+                if not airport:
+
+                    operations_result = {
+                        "success": False,
+                        "agent": "Operations Investigator",
+                        "error": "Airport is required.",
+                    }
+
+                else:
+
+                    operations_result = (
+                        operations_investigator(
+                            airport
+                        )
+                    )
+
+                trace_entry["result"] = operations_result
+                trace_entry["status"] = "completed"
+
+                execution_trace.append(trace_entry)
+
+                # Decide next action based on result.
+                next_action = self.decide_after_operations(
+                    question,
+                    operations_result,
+                )
+
+                print(
+                    "Next decision:",
+                    next_action,
+                )
+
+                if next_action == "policy":
+                    pending_agents.append("policy")
+
+            # ==================================================
+            # POLICY
+            # ==================================================
+
+            elif current_agent == "policy":
+
+                print("\n[Policy & Compliance]")
+
+                trace_entry["action"] = (
+                    "Retrieving relevant airport policy."
+                )
+
+                policy_result = (
+                    policy_compliance_agent(
+                        question,
+                        airport,
                     )
                 )
 
-        # ====================================================
-        # POLICY AGENT
-        # ====================================================
+                trace_entry["result"] = policy_result
+                trace_entry["status"] = "completed"
 
-        if "policy" in selected_agents:
+                execution_trace.append(trace_entry)
 
-            iteration += 1
-
-            print(
-                f"\nIteration {iteration}/{MAX_ITERATIONS}"
-            )
-
-            print(
-                "\n[Policy & Compliance]"
-            )
-
-            policy_result = (
-                policy_compliance_agent(
-                    question,
-                    airport
+                # Decide whether resolution is required.
+                next_action = self.decide_after_policy(
+                    question
                 )
-            )
 
-        # ====================================================
-        # RESOLUTION AGENT
-        # ====================================================
+                print(
+                    "Next decision:",
+                    next_action,
+                )
 
-        if "resolution" in selected_agents:
+                if next_action == "resolution":
+                    pending_agents.append("resolution")
 
-            iteration += 1
+            # ==================================================
+            # RESOLUTION
+            # ==================================================
 
-            print(
-                f"\nIteration {iteration}/{MAX_ITERATIONS}"
-            )
+            elif current_agent == "resolution":
 
-            print(
-                "\n[Resolution Agent]"
-            )
+                print("\n[Resolution Agent]")
 
-            resolution_result = resolution_agent(
-                question,
-                operations_result,
-                policy_result
-            )
+                trace_entry["action"] = (
+                    "Combining operational findings "
+                    "and policy constraints."
+                )
+
+                resolution_result = resolution_agent(
+                    question,
+                    operations_result,
+                    policy_result,
+                )
+
+                trace_entry["result"] = resolution_result
+                trace_entry["status"] = "completed"
+
+                execution_trace.append(trace_entry)
+
+                print(
+                    "Resolution generated."
+                )
 
         # ----------------------------------------------------
-        # Create final answer
+        # Iteration limit protection
+        # ----------------------------------------------------
+
+        if pending_agents:
+            execution_trace.append({
+                "iteration": iteration,
+                "agent": "Orchestrator",
+                "status": "stopped",
+                "reason": (
+                    "Maximum iteration limit reached."
+                ),
+            })
+
+        # ----------------------------------------------------
+        # Final answer
         # ----------------------------------------------------
 
         if resolution_result:
@@ -431,7 +589,7 @@ class AirportOrchestrator:
                     f"{operations_result['airport']}:\n"
                     + json.dumps(
                         operations_result["metrics"],
-                        indent=2
+                        indent=2,
                     )
                 )
 
@@ -441,7 +599,7 @@ class AirportOrchestrator:
                     "Unable to retrieve operational metrics: "
                     + operations_result.get(
                         "error",
-                        "Unknown error"
+                        "Unknown error",
                     )
                 )
 
@@ -453,27 +611,32 @@ class AirportOrchestrator:
             )
 
         # ----------------------------------------------------
-        # Save assistant response to memory
+        # Save assistant response
         # ----------------------------------------------------
 
         self.memory.add_message(
             session_id,
             "assistant",
-            final_answer
+            final_answer,
         )
 
         # ----------------------------------------------------
-        # Return complete execution trace
+        # Complete execution trace
         # ----------------------------------------------------
 
         return {
             "question": question,
             "airport": airport,
-            "selected_agents": selected_agents,
+            "selected_agents": [
+                item["agent"]
+                for item in execution_trace
+                if item["agent"] != "Orchestrator"
+            ],
             "iterations": iteration,
             "operations": operations_result,
             "policy": policy_result,
             "resolution": resolution_result,
+            "execution_trace": execution_trace,
             "answer": final_answer,
             "memory": self.memory.get_history(
                 session_id
@@ -497,7 +660,7 @@ if __name__ == "__main__":
     result = orchestrator.run(
         question=question,
         airport="SFO",
-        session_id="demo"
+        session_id="demo",
     )
 
     print("\n" + "=" * 70)
@@ -512,10 +675,17 @@ if __name__ == "__main__":
 
     print(
         "Selected Agents:",
-        result["selected_agents"]
+        result["selected_agents"],
     )
 
     print(
         "Iterations:",
-        result["iterations"]
+        result["iterations"],
     )
+
+    for step in result["execution_trace"]:
+        print(
+            f"\nIteration {step.get('iteration')}"
+            f" | Agent: {step.get('agent')}"
+            f" | Status: {step.get('status')}"
+        )
