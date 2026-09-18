@@ -1,4 +1,3 @@
-
 import os
 import json
 import re
@@ -47,7 +46,7 @@ def operations_investigator(airport: str) -> dict:
         return {
             "success": False,
             "agent": "Operations Investigator",
-            "error": metrics.get("error")
+            "error": metrics.get("error"),
         }
 
     queue = metrics["queue_size"]
@@ -96,13 +95,13 @@ def operations_investigator(airport: str) -> dict:
 
 def policy_compliance_agent(
     question: str,
-    airport: str | None = None
+    airport: str | None = None,
 ) -> dict:
 
     result = answer_question(
         question,
         airport=airport,
-        top_k=3
+        top_k=3,
     )
 
     return {
@@ -120,17 +119,17 @@ def policy_compliance_agent(
 def resolution_agent(
     question: str,
     operations_result: dict | None,
-    policy_result: dict | None
+    policy_result: dict | None,
 ) -> dict:
 
     operations_text = json.dumps(
         operations_result or {},
-        indent=2
+        indent=2,
     )
 
     policy_text = json.dumps(
         policy_result or {},
-        indent=2
+        indent=2,
     )
 
     prompt = f"""
@@ -159,6 +158,7 @@ Your responsibilities:
 
 If a sensitive operational action is recommended,
 describe it as a recommendation only.
+
 The Guardrails layer controls whether the action
 may actually be executed.
 
@@ -167,7 +167,7 @@ Return a clear operational recommendation.
 
     interaction = client.interactions.create(
         model=LLM_MODEL,
-        input=prompt
+        input=prompt,
     )
 
     return {
@@ -183,19 +183,8 @@ Return a clear operational recommendation.
 
 def extract_surge_request(
     question: str,
-    airport: str | None
+    airport: str | None,
 ) -> dict | None:
-
-    """
-    Detect an explicit surge action and extract:
-    - airport
-    - requested surge multiplier
-
-    Examples:
-        Increase SFO surge to 1.4x
-        Increase LAX surge to 1.3x
-        Set JFK surge to 1.5x
-    """
 
     question_lower = question.lower()
 
@@ -211,21 +200,22 @@ def extract_surge_request(
         r")\b"
         r".{0,50}"
         r"\bsurge\b",
-        re.IGNORECASE
+        re.IGNORECASE,
     )
 
     if not surge_action_pattern.search(question_lower):
         return None
 
-    # Extract airport from the question if explicitly mentioned.
     airport_match = re.search(
         r"\b(SFO|LAX|JFK)\b",
         question,
-        re.IGNORECASE
+        re.IGNORECASE,
     )
 
     if airport_match:
-        detected_airport = airport_match.group(1).upper()
+        detected_airport = (
+            airport_match.group(1).upper()
+        )
     elif airport:
         detected_airport = airport.upper()
     else:
@@ -238,10 +228,9 @@ def extract_surge_request(
             "requested_multiplier": None,
         }
 
-    # Extract multiplier such as 1.4x, 1.3x, 1.5x.
     multiplier_match = re.search(
         r"\b(\d+(?:\.\d+)?)\s*x\b",
-        question_lower
+        question_lower,
     )
 
     if not multiplier_match:
@@ -262,7 +251,6 @@ def extract_surge_request(
     }
 
 
-
 # ============================================================
 # SURGE ACTION GUARDRAIL
 # ============================================================
@@ -275,23 +263,21 @@ def handle_surge_action(
     approval_decision: bool | None = None,
 ) -> dict:
 
-    """
-    Validates and optionally executes a surge action.
-
-    IMPORTANT:
-    trigger_surge_override() is never called before
-    the required human approval has been received.
-    """
-
     request = extract_surge_request(
         question,
-        airport
+        airport,
     )
 
     if not request:
         return {
-            "action_detected": False
+            "action_detected": False,
         }
+
+    # Use explicitly mentioned airport if available.
+    target_airport = (
+        request.get("airport")
+        or airport
+    )
 
     requested_multiplier = request[
         "requested_multiplier"
@@ -305,7 +291,7 @@ def handle_surge_action(
             "error": (
                 "A surge multiplier is required. "
                 "Example: increase SFO surge to 1.4x."
-            )
+            ),
         }
 
         execution_trace.append({
@@ -324,7 +310,7 @@ def handle_surge_action(
 
     validation = validate_action(
         action="trigger_surge_override",
-        airport=airport,
+        airport=target_airport,
         requested_multiplier=requested_multiplier,
     )
 
@@ -347,11 +333,9 @@ def handle_surge_action(
             "executed": False,
             "result": {
                 "success": False,
-                "message": (
-                    "Action blocked by guardrails."
-                ),
+                "message": "Action blocked by guardrails.",
                 "validation": validation,
-            }
+            },
         }
 
     if validation.get(
@@ -360,7 +344,7 @@ def handle_surge_action(
 
         approval_request = request_human_approval(
             action="trigger_surge_override",
-            airport=airport,
+            airport=target_airport,
             details={
                 "requested_multiplier":
                     requested_multiplier,
@@ -384,14 +368,14 @@ def handle_surge_action(
         })
 
         # ----------------------------------------------------
-        # No decision supplied yet
+        # No human decision yet
         # ----------------------------------------------------
 
         if approval_decision is None:
 
             audit = create_audit_record(
                 question=question,
-                airport=airport,
+                airport=target_airport,
                 risk_level="HIGH",
                 action="trigger_surge_override",
                 result={
@@ -433,7 +417,7 @@ def handle_surge_action(
             "agent": "Human-in-the-Loop",
             "status": approval_result.get(
                 "status",
-                "error"
+                "error",
             ),
             "action": "process_approval",
             "result": approval_result,
@@ -441,12 +425,12 @@ def handle_surge_action(
 
         if not approval_result.get(
             "approved",
-            False
+            False,
         ):
 
             audit = create_audit_record(
                 question=question,
-                airport=airport,
+                airport=target_airport,
                 risk_level="HIGH",
                 action="trigger_surge_override",
                 result={
@@ -476,7 +460,7 @@ def handle_surge_action(
         # ----------------------------------------------------
 
         execution_result = trigger_surge_override(
-            airport=airport,
+            airport=target_airport,
             requested_multiplier=requested_multiplier,
             approved_by=approved_by,
         )
@@ -495,7 +479,7 @@ def handle_surge_action(
 
         audit = create_audit_record(
             question=question,
-            airport=airport,
+            airport=target_airport,
             risk_level="HIGH",
             action="trigger_surge_override",
             result={
@@ -508,7 +492,7 @@ def handle_surge_action(
             "action_detected": True,
             "executed": execution_result.get(
                 "success",
-                False
+                False,
             ),
             "approval_required": True,
             "approval_result": approval_result,
@@ -522,7 +506,7 @@ def handle_surge_action(
     # --------------------------------------------------------
 
     execution_result = trigger_surge_override(
-        airport=airport,
+        airport=target_airport,
         requested_multiplier=requested_multiplier,
     )
 
@@ -540,7 +524,7 @@ def handle_surge_action(
 
     audit = create_audit_record(
         question=question,
-        airport=airport,
+        airport=target_airport,
         risk_level="MEDIUM",
         action="trigger_surge_override",
         result=execution_result,
@@ -550,7 +534,7 @@ def handle_surge_action(
         "action_detected": True,
         "executed": execution_result.get(
             "success",
-            False
+            False,
         ),
         "approval_required": False,
         "execution_result": execution_result,
@@ -575,7 +559,7 @@ class AirportOrchestrator:
 
     def determine_initial_agents(
         self,
-        question: str
+        question: str,
     ) -> list[str]:
 
         question_lower = question.lower()
@@ -591,7 +575,7 @@ class AirportOrchestrator:
             "requests",
             "operational",
             "current",
-            "latest"
+            "latest",
         ]
 
         policy_keywords = [
@@ -602,7 +586,7 @@ class AirportOrchestrator:
             "rule",
             "limit",
             "compliance",
-            "threshold"
+            "threshold",
         ]
 
         resolution_keywords = [
@@ -613,7 +597,7 @@ class AirportOrchestrator:
             "action",
             "increase surge",
             "apply surge",
-            "what can we do"
+            "what can we do",
         ]
 
         agents = []
@@ -647,7 +631,9 @@ class AirportOrchestrator:
             if "policy" not in agents:
                 agents.insert(1, "policy")
 
-        return list(dict.fromkeys(agents))
+        return list(
+            dict.fromkeys(agents)
+        )
 
     # --------------------------------------------------------
     # Decide next agent after operations
@@ -655,7 +641,7 @@ class AirportOrchestrator:
 
     def decide_after_operations(
         self,
-        question: str
+        question: str,
     ) -> str:
 
         question_lower = question.lower()
@@ -696,7 +682,7 @@ class AirportOrchestrator:
 
     def decide_after_policy(
         self,
-        question: str
+        question: str,
     ) -> str:
 
         question_lower = question.lower()
@@ -732,12 +718,38 @@ class AirportOrchestrator:
     ) -> dict:
 
         # ----------------------------------------------------
+        # Resolve airport from question or UI selection
+        # ----------------------------------------------------
+
+        detected_airport_match = re.search(
+            r"\b(SFO|LAX|JFK)\b",
+            question,
+            re.IGNORECASE,
+        )
+
+        if detected_airport_match:
+
+            effective_airport = (
+                detected_airport_match.group(1).upper()
+            )
+
+        else:
+
+            effective_airport = (
+                airport.upper()
+                if airport
+                else None
+            )
+
+        airport = effective_airport
+
+        # ----------------------------------------------------
         # Guardrails FIRST
         # ----------------------------------------------------
 
         guardrail_result = run_guardrails(
             question,
-            airport
+            airport,
         )
 
         print("\n" + "=" * 70)
@@ -748,26 +760,26 @@ class AirportOrchestrator:
             "Risk Level:",
             guardrail_result.get(
                 "risk_level"
-            )
+            ),
         )
 
         print(
             "Human Approval Required:",
             guardrail_result.get(
                 "requires_human_approval"
-            )
+            ),
         )
 
         if not guardrail_result.get(
             "allowed",
-            False
+            False,
         ):
 
             print(
                 "Request blocked:",
                 guardrail_result.get(
                     "error"
-                )
+                ),
             )
 
             return {
@@ -777,7 +789,7 @@ class AirportOrchestrator:
                     "Request blocked by guardrails: "
                     + guardrail_result.get(
                         "error",
-                        "Invalid request."
+                        "Invalid request.",
                     )
                 ),
                 "guardrails": guardrail_result,
@@ -792,7 +804,7 @@ class AirportOrchestrator:
         self.memory.add_message(
             session_id,
             "user",
-            question
+            question,
         )
 
         history = self.memory.format_history(
@@ -817,7 +829,7 @@ class AirportOrchestrator:
 
         surge_request = extract_surge_request(
             question,
-            airport
+            airport,
         )
 
         action_result = None
@@ -832,30 +844,31 @@ class AirportOrchestrator:
                 approval_decision=approval_decision,
             )
 
-            # If action is pending/rejected/blocked,
-            # return without pretending execution occurred.
-
+            # Pending approval
             if (
                 action_result.get(
                     "approval_required"
                 )
                 and not action_result.get(
                     "executed",
-                    False
+                    False,
                 )
+                and action_result.get(
+                    "approval_result"
+                ) is None
             ):
 
                 final_answer = (
                     action_result["result"].get(
                         "message",
-                        "Human approval is required."
+                        "Human approval is required.",
                     )
                 )
 
                 self.memory.add_message(
                     session_id,
                     "assistant",
-                    final_answer
+                    final_answer,
                 )
 
                 return {
@@ -873,27 +886,62 @@ class AirportOrchestrator:
                     ),
                 }
 
-            # If invalid, return immediately.
-
-            if not action_result.get(
-                "result",
-                {}
-            ).get(
-                "success",
-                False
+            # Rejected approval
+            if (
+                action_result.get(
+                    "approval_result",
+                    {}
+                ).get("status") == "REJECTED"
             ):
 
                 final_answer = (
                     action_result["result"].get(
                         "message",
-                        "Operational action blocked."
+                        "Operational action rejected.",
                     )
                 )
 
                 self.memory.add_message(
                     session_id,
                     "assistant",
-                    final_answer
+                    final_answer,
+                )
+
+                return {
+                    "question": question,
+                    "airport": airport,
+                    "answer": final_answer,
+                    "guardrails": guardrail_result,
+                    "action": action_result,
+                    "execution_trace": execution_trace,
+                    "iterations": len(
+                        execution_trace
+                    ),
+                    "memory": self.memory.get_history(
+                        session_id
+                    ),
+                }
+
+            # Invalid action
+            if not action_result.get(
+                "result",
+                {}
+            ).get(
+                "success",
+                False,
+            ):
+
+                final_answer = (
+                    action_result["result"].get(
+                        "message",
+                        "Operational action blocked.",
+                    )
+                )
+
+                self.memory.add_message(
+                    session_id,
+                    "assistant",
+                    final_answer,
                 )
 
                 return {
@@ -966,7 +1014,7 @@ class AirportOrchestrator:
                         "agent":
                             "Operations Investigator",
                         "error":
-                            "Airport is required."
+                            "Airport is required.",
                     }
 
                 else:
@@ -982,11 +1030,13 @@ class AirportOrchestrator:
                     "agent":
                         "Operations Investigator",
                     "status":
-                        "completed"
-                        if operations_result.get(
-                            "success"
-                        )
-                        else "failed",
+                        (
+                            "completed"
+                            if operations_result.get(
+                                "success"
+                            )
+                            else "failed"
+                        ),
                     "action":
                         "get_airport_metrics",
                     "result":
